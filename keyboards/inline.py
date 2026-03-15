@@ -1,6 +1,6 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy import select
-from database import async_session, District
+from database import async_session, District, Request
 
 def get_geo_choice_keyboard():
     """Клавиатура выбора способа указания адреса"""
@@ -58,10 +58,18 @@ def get_installer_requests_keyboard(requests):
     buttons = []
     for req in requests:
         # Обрезаем адрес до 30 символов
-        address_short = req.address[:30] + "..." if len(req.address) > 30 else req.address
+        address_short = req.address[:30] + "..." if req.address and len(req.address) > 30 else (req.address or "Адрес не указан")
+        
+        # Получаем имя клиента для отображения
+        client_name = ""
+        if req.client and req.client.name:
+            client_name = f" - {req.client.name[:15]}"
+        elif req.client and req.client.username:
+            client_name = f" - @{req.client.username[:15]}"
+        
         buttons.append([
             InlineKeyboardButton(
-                text=f"📋 Заявка №{req.id} - {address_short}",
+                text=f"📋 Заявка №{req.id}{client_name} - {address_short}",
                 callback_data=f"view_{req.id}"
             )
         ])
@@ -75,6 +83,7 @@ async def get_installer_all_requests_keyboard(installer_id: int):
         # Получаем активные заявки
         active_result = await session.execute(
             select(Request)
+            .options(selectinload(Request.client))
             .where(
                 and_(Request.installer_id == installer_id, Request.status == 'in_progress')
             )
@@ -85,11 +94,12 @@ async def get_installer_all_requests_keyboard(installer_id: int):
         # Получаем выполненные заявки
         completed_result = await session.execute(
             select(Request)
+            .options(selectinload(Request.client))
             .where(
                 and_(Request.installer_id == installer_id, Request.status == 'completed')
             )
             .order_by(Request.created_at.desc())
-            .limit(10)
+            .limit(20)
         )
         completed_requests = completed_result.scalars().all()
     
@@ -99,10 +109,18 @@ async def get_installer_all_requests_keyboard(installer_id: int):
     if active_requests:
         buttons.append([InlineKeyboardButton(text="🔨 АКТИВНЫЕ ЗАЯВКИ", callback_data="ignore")])
         for req in active_requests:
-            address_short = req.address[:20] + "..." if len(req.address) > 20 else req.address
+            address_short = req.address[:20] + "..." if req.address and len(req.address) > 20 else (req.address or "Адрес не указан")
+            
+            # Получаем имя клиента
+            client_short = ""
+            if req.client and req.client.name:
+                client_short = f" ({req.client.name[:15]})"
+            elif req.client and req.client.username:
+                client_short = f" (@{req.client.username[:15]})"
+            
             buttons.append([
                 InlineKeyboardButton(
-                    text=f"🔨 №{req.id} - {address_short}",
+                    text=f"🔨 №{req.id}{client_short} - {address_short}",
                     callback_data=f"view_{req.id}"
                 )
             ])
@@ -112,15 +130,32 @@ async def get_installer_all_requests_keyboard(installer_id: int):
         if active_requests:
             buttons.append([InlineKeyboardButton(text="✅ ВЫПОЛНЕННЫЕ", callback_data="ignore")])
         for req in completed_requests:
-            address_short = req.address[:20] + "..." if len(req.address) > 20 else req.address
+            address_short = req.address[:20] + "..." if req.address and len(req.address) > 20 else (req.address or "Адрес не указан")
+            
+            # Получаем имя клиента
+            client_short = ""
+            if req.client and req.client.name:
+                client_short = f" ({req.client.name[:15]})"
+            elif req.client and req.client.username:
+                client_short = f" (@{req.client.username[:15]})"
+            
+            # Дата завершения
+            date_str = ""
+            if req.completed_at:
+                date_str = f" {req.completed_at.strftime('%d.%m')}"
+            
             buttons.append([
                 InlineKeyboardButton(
-                    text=f"✅ №{req.id} - {address_short}",
+                    text=f"✅ №{req.id}{client_short} - {address_short}{date_str}",
                     callback_data=f"view_completed_{req.id}"
                 )
             ])
     
-    buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")])
+    # Если нет заявок
+    if not active_requests and not completed_requests:
+        buttons.append([InlineKeyboardButton(text="📭 Нет заявок", callback_data="ignore")])
+    
+    buttons.append([InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="back_to_main")])
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -164,3 +199,30 @@ def get_installer_stats_keyboard(installer_id: int):
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_contact_keyboard(phone: str, username: str = None, telegram_id: int = None):
+    """Клавиатура для связи с клиентом"""
+    buttons = []
+    
+    # Кнопка для звонка
+    if phone:
+        clean_phone = ''.join(filter(str.isdigit, phone))
+        if clean_phone:
+            if not clean_phone.startswith('7') and not clean_phone.startswith('8'):
+                clean_phone = '7' + clean_phone
+            tel_url = f"tel:+{clean_phone}"
+            buttons.append([
+                InlineKeyboardButton(text="📞 Позвонить клиенту", url=tel_url)
+            ])
+    
+    # Кнопка для написания в Telegram
+    if username:
+        buttons.append([
+            InlineKeyboardButton(text="💬 Написать в Telegram", url=f"https://t.me/{username}")
+        ])
+    elif telegram_id:
+        buttons.append([
+            InlineKeyboardButton(text="💬 Написать сообщение", url=f"tg://user?id={telegram_id}")
+        ])
+    
+    return InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None

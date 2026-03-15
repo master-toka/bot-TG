@@ -314,7 +314,7 @@ async def stats_button(message: Message):
         await message.answer(text)
 
 async def send_request_details_to_installer(bot, installer_id: int, request: Request, session: AsyncSession):
-    """Отправка деталей заявки монтажнику в ЛС с кнопкой связи с клиентом"""
+    """Отправка деталей заявки монтажнику в ЛС с кнопками связи с клиентом и завершения"""
     # Получаем район и клиента
     district = await session.get(District, request.district_id)
     client = await session.get(User, request.client_id)
@@ -346,6 +346,7 @@ async def send_request_details_to_installer(bot, installer_id: int, request: Req
             )
         ])
     
+    # Кнопка для открытия на карте
     if request.latitude and request.longitude:
         keyboard_buttons.append([
             InlineKeyboardButton(
@@ -354,7 +355,7 @@ async def send_request_details_to_installer(bot, installer_id: int, request: Req
             )
         ])
     
-    # Исправляем формат tel: ссылки - добавляем + в начало если его нет
+    # Кнопка для звонка
     phone = request.contact_phone
     if phone:
         # Очищаем номер от лишних символов
@@ -372,25 +373,30 @@ async def send_request_details_to_installer(bot, installer_id: int, request: Req
                 )
             ])
     
+    # Кнопка завершения заявки
     keyboard_buttons.append([
         InlineKeyboardButton(text="✅ Завершить заявку", callback_data=f"complete_{request.id}")
     ])
     
+    # Создаем клавиатуру
     keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
     
     # Отправляем фото если есть
     if request.photo_file_id:
         photo_ids = request.photo_file_id.split(',')
         try:
+            # Отправляем первое фото с подписью и клавиатурой
             await bot.send_photo(
                 chat_id=installer_id,
                 photo=photo_ids[0],
                 caption=text,
                 reply_markup=keyboard
             )
+            # Отправляем остальные фото без клавиатуры
             for photo_id in photo_ids[1:]:
                 await bot.send_photo(chat_id=installer_id, photo=photo_id)
         except Exception as e:
+            print(f"Ошибка при отправке фото: {e}")
             # Если не получилось отправить фото, отправляем только текст
             await bot.send_message(
                 chat_id=installer_id,
@@ -403,6 +409,7 @@ async def send_request_details_to_installer(bot, installer_id: int, request: Req
             text=text,
             reply_markup=keyboard
         )
+
 @router.callback_query(F.data.startswith("view_"))
 async def view_request(callback: CallbackQuery):
     """Просмотр деталей заявки"""
@@ -451,6 +458,7 @@ async def view_request(callback: CallbackQuery):
                 )
             ])
         
+        # Кнопка для открытия на карте
         if request.latitude and request.longitude:
             keyboard_buttons.append([
                 InlineKeyboardButton(
@@ -459,11 +467,28 @@ async def view_request(callback: CallbackQuery):
                 )
             ])
         
+        # Кнопка для звонка
+        phone = request.contact_phone
+        if phone:
+            clean_phone = ''.join(filter(str.isdigit, phone))
+            if clean_phone:
+                if not clean_phone.startswith('7') and not clean_phone.startswith('8'):
+                    clean_phone = '7' + clean_phone
+                tel_url = f"tel:+{clean_phone}"
+                keyboard_buttons.append([
+                    InlineKeyboardButton(
+                        text="📞 Позвонить",
+                        url=tel_url
+                    )
+                ])
+        
+        # Кнопка завершения заявки (только для активных)
         if request.status == 'in_progress':
             keyboard_buttons.append([
                 InlineKeyboardButton(text="✅ Завершить", callback_data=f"complete_{request.id}")
             ])
         
+        # Кнопка назад
         keyboard_buttons.append([
             InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_list")
         ])
@@ -648,45 +673,3 @@ async def show_my_id(callback: CallbackQuery):
         f"📱 <b>Ваш Telegram ID:</b>\n<code>{callback.from_user.id}</code>"
     )
     await callback.answer()
-@router.message(F.text == "📊 Статистика")
-async def stats_button(message: Message):
-    """Статистика монтажника"""
-    async with async_session() as session:
-        result = await session.execute(
-            select(User).where(User.telegram_id == message.from_user.id)
-        )
-        user = result.scalar_one_or_none()
-        
-        if not user or user.role != 'installer':
-            await message.answer("❌ Эта функция доступна только монтажникам")
-            return
-        
-        # Получаем статистику
-        requests_result = await session.execute(
-            select(Request).where(Request.installer_id == user.id)
-        )
-        all_requests = requests_result.scalars().all()
-        completed = sum(1 for r in all_requests if r.status == 'completed')
-        in_progress = sum(1 for r in all_requests if r.status == 'in_progress')
-        
-        refusals_result = await session.execute(
-            select(Refusal).where(Refusal.installer_id == user.id)
-        )
-        refusals = refusals_result.scalars().all()
-        
-        # Получаем рейтинг
-        rating = completed - len(refusals)
-        
-        text = (
-            f"📊 <b>Ваша статистика</b>\n\n"
-            f"📋 Всего заявок взято: {len(all_requests)}\n"
-            f"🔨 В работе: {in_progress}\n"
-            f"✅ Выполнено: {completed}\n"
-            f"❌ Отказов: {len(refusals)}\n"
-            f"⭐ Рейтинг: {rating}\n\n"
-            
-            f"📈 <b>Процент выполнения:</b> "
-            f"{int(completed/len(all_requests)*100) if all_requests else 0}%"
-        )
-        
-        await message.answer(text)

@@ -123,10 +123,19 @@ async def take_request(callback: CallbackQuery):
         request.assigned_at = datetime.now()
         
         # Обновляем сообщение в группе
-        await callback.message.edit_caption(
-            caption=f"{callback.message.caption}\n\n🔨 Взял: @{installer.username or installer.name}",
-            reply_markup=None
-        )
+        try:
+            await callback.message.edit_caption(
+                caption=f"{callback.message.caption}\n\n🔨 Взял: @{installer.username or installer.name}",
+                reply_markup=None
+            )
+        except:
+            try:
+                await callback.message.edit_text(
+                    text=f"{callback.message.text}\n\n🔨 Взял: @{installer.username or installer.name}",
+                    reply_markup=None
+                )
+            except:
+                pass
         
         # Уведомляем заказчика
         await callback.bot.send_message(
@@ -193,11 +202,21 @@ async def process_refuse_reason(message: Message, state: FSMContext):
             group_msg = result.scalar_one_or_none()
             
             if group_msg:
-                await message.bot.edit_message_caption(
-                    chat_id=group_msg.group_chat_id,
-                    message_id=group_msg.message_id,
-                    caption=f"{group_msg.caption}\n\n⚠️ Отказ от @{installer.username}: {reason}"
-                )
+                try:
+                    await message.bot.edit_message_caption(
+                        chat_id=group_msg.group_chat_id,
+                        message_id=group_msg.message_id,
+                        caption=f"{group_msg.caption}\n\n⚠️ Отказ от @{installer.username}: {reason}"
+                    )
+                except:
+                    try:
+                        await message.bot.edit_message_text(
+                            chat_id=group_msg.group_chat_id,
+                            message_id=group_msg.message_id,
+                            text=f"{group_msg.text}\n\n⚠️ Отказ от @{installer.username}: {reason}"
+                        )
+                    except:
+                        pass
             
             await session.commit()
             await message.answer("✅ Отказ зарегистрирован")
@@ -279,12 +298,23 @@ async def process_cancel_reason(message: Message, state: FSMContext):
                 f"⚠️ Отменена предыдущим монтажником. Снова доступна!"
             )
             
-            await message.bot.edit_message_caption(
-                chat_id=group_msg.group_chat_id,
-                message_id=group_msg.message_id,
-                caption=text,
-                reply_markup=get_request_action_keyboard(request.id)
-            )
+            try:
+                await message.bot.edit_message_caption(
+                    chat_id=group_msg.group_chat_id,
+                    message_id=group_msg.message_id,
+                    caption=text,
+                    reply_markup=get_request_action_keyboard(request.id)
+                )
+            except:
+                try:
+                    await message.bot.edit_message_text(
+                        chat_id=group_msg.group_chat_id,
+                        message_id=group_msg.message_id,
+                        text=text,
+                        reply_markup=get_request_action_keyboard(request.id)
+                    )
+                except:
+                    pass
         
         # Уведомляем заказчика
         await message.bot.send_message(
@@ -331,8 +361,10 @@ async def my_requests(message: Message):
             await message.answer("📭 У вас нет активных заявок")
             return
         
+        # Показываем количество активных заявок
         await message.answer(
-            "📋 Ваши заявки в работе:",
+            f"📋 <b>Ваши активные заявки ({len(requests)})</b>\n\n"
+            f"Выберите заявку для просмотра деталей:",
             reply_markup=get_installer_requests_keyboard(requests)
         )
 
@@ -369,17 +401,15 @@ async def my_all_requests(message: Message):
         in_progress = sum(1 for r in all_requests if r.status == 'in_progress')
         
         text = (
-            f"📊 <b>Ваша статистика</b>\n\n"
+            f"📊 <b>Все ваши заявки</b>\n\n"
             f"📋 Всего взято заявок: {len(all_requests)}\n"
             f"🔨 В работе: {in_progress}\n"
             f"✅ Выполнено: {completed}\n\n"
             f"Выберите заявку для просмотра деталей:"
         )
         
-        await message.answer(
-            text,
-            reply_markup=await get_installer_all_requests_keyboard(installer.id)
-        )
+        keyboard = await get_installer_all_requests_keyboard(installer.id)
+        await message.answer(text, reply_markup=keyboard)
 
 @router.message(F.text == "📊 Статистика")
 async def stats_button(message: Message):
@@ -417,7 +447,6 @@ async def stats_button(message: Message):
             f"✅ Выполнено: {completed}\n"
             f"❌ Отказов: {len(refusals)}\n"
             f"⭐ Рейтинг: {rating}\n\n"
-            
             f"📈 <b>Процент выполнения:</b> "
             f"{int(completed/len(all_requests)*100) if all_requests else 0}%"
         )
@@ -432,10 +461,12 @@ async def send_request_details_to_installer(bot, installer_id: int, request: Req
     
     text = (
         f"🔨 <b>Заявка №{request.id} (в работе)</b>\n\n"
-        f"📝 Описание: {request.description}\n"
-        f"📍 Район: {district.name}\n"
-        f"🏠 Адрес: {request.address}\n"
-        f"📞 Телефон клиента: {request.contact_phone}\n"
+        f"📝 <b>Описание:</b> {request.description}\n"
+        f"📍 <b>Район:</b> {district.name}\n"
+        f"🏠 <b>Адрес:</b> {request.address}\n"
+        f"📞 <b>Телефон клиента:</b> {request.contact_phone}\n"
+        f"👤 <b>Клиент:</b> {client.name or 'Не указано'}\n"
+        f"📅 <b>Взята в работу:</b> {datetime.now().strftime('%d.%m.%Y %H:%M')}\n"
     )
     
     # Создаем клавиатуру с действиями
@@ -509,8 +540,12 @@ async def send_request_details_to_installer(bot, installer_id: int, request: Req
                 reply_markup=keyboard
             )
             # Отправляем остальные фото без клавиатуры
-            for photo_id in photo_ids[1:]:
-                await bot.send_photo(chat_id=installer_id, photo=photo_id)
+            for i, photo_id in enumerate(photo_ids[1:], 2):
+                await bot.send_photo(
+                    chat_id=installer_id,
+                    photo=photo_id,
+                    caption=f"Фото {i} к заявке №{request.id}"
+                )
         except Exception as e:
             print(f"Ошибка при отправке фото: {e}")
             # Если не получилось отправить фото, отправляем только текст
@@ -547,32 +582,46 @@ async def view_request(callback: CallbackQuery):
         district = await session.get(District, request.district_id)
         client = request.client
         
+        # Получаем текущего пользователя
+        result = await session.execute(
+            select(User).where(User.telegram_id == callback.from_user.id)
+        )
+        current_user = result.scalar_one_or_none()
+        
         text = (
             f"🔨 <b>Заявка №{request.id}</b>\n\n"
-            f"📝 Описание: {request.description}\n"
-            f"📍 Район: {district.name}\n"
-            f"🏠 Адрес: {request.address}\n"
-            f"📞 Телефон клиента: {request.contact_phone}\n"
-            f"📊 Статус: {request.status}\n"
+            f"📝 <b>Описание:</b> {request.description}\n"
+            f"📍 <b>Район:</b> {district.name}\n"
+            f"🏠 <b>Адрес:</b> {request.address}\n"
+            f"📞 <b>Телефон клиента:</b> {request.contact_phone}\n"
+            f"👤 <b>Клиент:</b> {client.name or 'Не указано'}\n"
+            f"📊 <b>Статус:</b> {request.status}\n"
+            f"📅 <b>Создана:</b> {request.created_at.strftime('%d.%m.%Y %H:%M')}\n"
         )
+        
+        if request.assigned_at:
+            text += f"📅 <b>Взята в работу:</b> {request.assigned_at.strftime('%d.%m.%Y %H:%M')}\n"
+        if request.completed_at:
+            text += f"📅 <b>Завершена:</b> {request.completed_at.strftime('%d.%m.%Y %H:%M')}\n"
         
         keyboard_buttons = []
         
-        # Кнопка для связи с клиентом
-        if client and client.username:
-            keyboard_buttons.append([
-                InlineKeyboardButton(
-                    text="💬 Написать клиенту",
-                    url=f"https://t.me/{client.username}"
-                )
-            ])
-        elif client:
-            keyboard_buttons.append([
-                InlineKeyboardButton(
-                    text="💬 Написать клиенту",
-                    url=f"tg://user?id={client.telegram_id}"
-                )
-            ])
+        # Кнопка для связи с клиентом (всегда показываем, если есть клиент)
+        if client:
+            if client.username:
+                keyboard_buttons.append([
+                    InlineKeyboardButton(
+                        text="💬 Написать клиенту",
+                        url=f"https://t.me/{client.username}"
+                    )
+                ])
+            else:
+                keyboard_buttons.append([
+                    InlineKeyboardButton(
+                        text="💬 Написать клиенту",
+                        url=f"tg://user?id={client.telegram_id}"
+                    )
+                ])
         
         # Кнопка для открытия на карте
         if request.latitude and request.longitude:
@@ -598,32 +647,27 @@ async def view_request(callback: CallbackQuery):
                     )
                 ])
         
-        # Кнопки для активных заявок
-        if request.status == 'in_progress':
-            # Проверяем, что это заявка текущего монтажника
-            result = await session.execute(
-                select(User).where(User.telegram_id == callback.from_user.id)
-            )
-            current_user = result.scalar_one_or_none()
-            
-            if current_user and current_user.id == request.installer_id:
-                keyboard_buttons.append([
-                    InlineKeyboardButton(text="✅ Завершить заявку", callback_data=f"complete_{request.id}")
-                ])
-                keyboard_buttons.append([
-                    InlineKeyboardButton(text="❌ Отменить заявку", callback_data=f"cancel_request_{request.id}")
-                ])
+        # Кнопки для активных заявок текущего монтажника
+        if request.status == 'in_progress' and current_user and current_user.id == request.installer_id:
+            keyboard_buttons.append([
+                InlineKeyboardButton(text="✅ Завершить заявку", callback_data=f"complete_{request.id}")
+            ])
+            keyboard_buttons.append([
+                InlineKeyboardButton(text="❌ Отменить заявку", callback_data=f"cancel_request_{request.id}")
+            ])
         
         # Кнопка назад
         keyboard_buttons.append([
-            InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_list")
+            InlineKeyboardButton(text="⬅️ Назад к списку", callback_data="back_to_list")
         ])
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
         
+        # Отправляем сообщение
         if request.photo_file_id:
             photo_ids = request.photo_file_id.split(',')
             try:
+                # Пробуем отредактировать существующее сообщение
                 await callback.message.delete()
                 await callback.bot.send_photo(
                     chat_id=callback.from_user.id,
@@ -632,9 +676,13 @@ async def view_request(callback: CallbackQuery):
                     reply_markup=keyboard
                 )
             except:
-                await callback.message.edit_text(text, reply_markup=keyboard)
+                # Если не получается, отправляем новое
+                await callback.message.answer(text, reply_markup=keyboard)
         else:
-            await callback.message.edit_text(text, reply_markup=keyboard)
+            try:
+                await callback.message.edit_text(text, reply_markup=keyboard)
+            except:
+                await callback.message.answer(text, reply_markup=keyboard)
     
     await callback.answer()
 
@@ -698,7 +746,15 @@ async def complete_request(callback: CallbackQuery):
                     reply_markup=None
                 )
             except:
-                pass
+                try:
+                    await callback.bot.edit_message_text(
+                        chat_id=group_msg.group_chat_id,
+                        message_id=group_msg.message_id,
+                        text=f"{group_msg.text}\n\n✅ Заявка выполнена!",
+                        reply_markup=None
+                    )
+                except:
+                    pass
         
         await session.commit()
     
@@ -728,17 +784,19 @@ async def back_to_list(callback: CallbackQuery, state: FSMContext):
         )
         requests = result.scalars().all()
         
+        try:
+            await callback.message.delete()
+        except:
+            pass
+        
         if requests:
-            try:
-                await callback.message.delete()
-            except:
-                pass
             await callback.message.answer(
-                "📋 Ваши заявки в работе:",
+                f"📋 <b>Ваши активные заявки ({len(requests)})</b>\n\n"
+                f"Выберите заявку для просмотра деталей:",
                 reply_markup=get_installer_requests_keyboard(requests)
             )
         else:
-            await callback.message.edit_text("📭 У вас нет активных заявок")
+            await callback.message.answer("📭 У вас нет активных заявок")
     
     await callback.answer()
 
@@ -783,6 +841,7 @@ async def show_my_profile(message: Message):
                 f"• В работе: {in_progress}\n"
                 f"• Выполнено: {completed}\n"
                 f"• Отказов: {len(refusals)}\n"
+                f"• Рейтинг: {completed - len(refusals)}\n"
             )
             
         elif user.role == 'client':
